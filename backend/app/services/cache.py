@@ -16,14 +16,14 @@ async def get_revenue_summary(property_id: str, tenant_id: str, *, month: int | 
 
     # Version the namespace to bypass legacy shared entries and previously cached mock totals.
     # JSON encoding keeps tenant/property pairs distinct even if IDs contain ':'.
-    cache_key = "revenue:v3:" + json.dumps([tenant_id, property_id], separators=(",", ":"))
+    cache_key = "revenue:v5:all:" + json.dumps([tenant_id, property_id], separators=(",", ":"))
     
     if (month is None) != (year is None):
         raise ValueError("Month and year must be supplied together")
     if month is not None:
         if not timezone_name or not 1 <= month <= 12 or not 1 <= year <= 9998:
             raise ValueError("Invalid monthly reporting period or time zone")
-        cache_key = "revenue:v4:monthly:" + json.dumps(
+        cache_key = "revenue:v5:monthly:" + json.dumps(
             [tenant_id, property_id, year, month, timezone_name], separators=(",", ":")
         )
 

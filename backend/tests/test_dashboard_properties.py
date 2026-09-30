@@ -19,7 +19,7 @@ class PropertyRoutesTests(unittest.TestCase):
         self.client = TestClient(app)
         self.lookup = AsyncMock()
         self.revenue = AsyncMock(return_value={
-            'property_id': 'prop-001', 'total': '0', 'currency': 'USD', 'count': 0,
+            'property_id': 'prop-001', 'total': '0', 'currency': 'USD', 'revenue_by_currency': [], 'count': 0,
         })
         for target, mock in [('get_tenant_properties', self.lookup), ('get_revenue_summary', self.revenue)]:
             patcher = patch('app.api.v1.dashboard.' + target, mock)

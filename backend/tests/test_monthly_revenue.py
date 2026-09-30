@@ -48,7 +48,7 @@ class MonthlyEndpointTests(unittest.TestCase):
         with patch('app.api.v1.dashboard.get_tenant_properties', new_callable=AsyncMock,
                    return_value=[{'id': 'prop-001', 'timezone': 'Europe/Paris'}]), patch(
             'app.api.v1.dashboard.get_revenue_summary', new_callable=AsyncMock,
-            return_value={'property_id': 'prop-001', 'total': '2250', 'currency': 'USD', 'count': 4},
+            return_value={'property_id': 'prop-001', 'total': '2250', 'currency': 'USD', 'revenue_by_currency': [], 'count': 4},
         ) as fetch:
             response = self.client.get('/dashboard/summary?property_id=prop-001&month=3&year=2024&timezone=UTC')
             self.assertEqual(response.status_code, 200)
@@ -100,7 +100,7 @@ class MonthlyPostgresTests(unittest.IsolatedAsyncioTestCase):
         try:
             async with pool.get_session() as session:
                 # This connection-local table shadows the real table; no fixture data is changed.
-                await session.execute(text('CREATE TEMP TABLE reservations (property_id TEXT, tenant_id TEXT, check_in_date TIMESTAMPTZ, total_amount NUMERIC(10,3))'))
+                await session.execute(text("CREATE TEMP TABLE reservations (property_id TEXT, tenant_id TEXT, check_in_date TIMESTAMPTZ, total_amount NUMERIC(10,3), currency TEXT DEFAULT 'USD')"))
                 rows = [
                     ('tenant-a', '2024-02-29T22:59:59+00:00', '10'),
                     ('tenant-a', '2024-02-29T23:00:00+00:00', '20'),
@@ -110,7 +110,7 @@ class MonthlyPostgresTests(unittest.IsolatedAsyncioTestCase):
                     ('tenant-b', '2024-03-15T10:00:00+00:00', '999'),
                 ]
                 for tenant, date, amount in rows:
-                    await session.execute(text("INSERT INTO reservations VALUES ('prop-001', :tenant, :date, :amount)"),
+                    await session.execute(text("INSERT INTO reservations (property_id, tenant_id, check_in_date, total_amount) VALUES ('prop-001', :tenant, :date, :amount)"),
                                           dict(tenant=tenant, date=datetime.fromisoformat(date), amount=float(amount)))
                 @asynccontextmanager
                 async def same_session():
@@ -118,7 +118,7 @@ class MonthlyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 scoped_pool = SimpleNamespace(initialize=AsyncMock(), get_session=same_session)
                 with patch.object(reservations, 'db_pool', scoped_pool):
                     result = await reservations.calculate_monthly_revenue('prop-001', 'tenant-a', 3, 2024, 'Europe/Paris')
-                    self.assertEqual(result['total'], '1300.000')
+                    self.assertEqual(result['total'], '1300.00')
                     self.assertEqual(result['count'], 3)
                     empty = await reservations.calculate_monthly_revenue('prop-001', 'tenant-a', 5, 2024, 'Europe/Paris')
                     self.assertEqual(empty['count'], 0)

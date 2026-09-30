@@ -21,11 +21,14 @@ class RevenueDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 session = AsyncMock()
                 pool.get_session.return_value.__aenter__.return_value = session
                 result = MagicMock()
-                result.one.return_value = SimpleNamespace(total_revenue=amount, reservation_count=count)
+                result.all.return_value = [SimpleNamespace(currency='USD', total_revenue=amount, reservation_count=count)] if count else []
                 session.execute.return_value = result
                 with patch.object(reservations, 'db_pool', pool):
                     actual = await reservations.calculate_total_revenue('prop-001', 'tenant-a')
-                self.assertEqual(Decimal(actual['total']), amount)
+                if count:
+                    self.assertEqual(Decimal(actual['total']), amount)
+                else:
+                    self.assertEqual(actual['revenue_by_currency'], [])
                 self.assertEqual(actual['count'], count)
                 self.assertEqual(session.execute.call_args.args[1],
                                  {'property_id': 'prop-001', 'tenant_id': 'tenant-a'})

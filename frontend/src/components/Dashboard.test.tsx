@@ -16,7 +16,8 @@ const sunset = [
   { id: 'prop-002', name: 'City Apartment Downtown', timezone: 'Europe/Paris' },
 ];
 const response = (total: number, id = 'prop-001') => ({
-  property_id: id, total_revenue: total, currency: 'USD', reservations_count: total ? 4 : 0,
+  property_id: id, total_revenue: total ? total.toFixed(2) : null, currency: total ? 'USD' : null, reservations_count: total ? 4 : 0,
+  revenue_by_currency: total ? [{currency: 'USD', total_revenue: total.toFixed(2), exact_total_revenue: String(total), reservations_count: 4}] : [],
 });
 const deferred = () => {
   let resolve!: (value: ReturnType<typeof response>) => void;
@@ -80,9 +81,9 @@ describe('dashboard reporting controls', () => {
     mocks.summary.mockImplementation((_id, options) => options.month === 3 ? march.promise : Promise.resolve(response(0)));
     monthly('2024-03');
     fireEvent.change(screen.getByLabelText('Month'), { target: { value: '2024-04' } });
-    await screen.findByText('USD 0.00');
+    await screen.findByText('No revenue for this period.');
     await act(async () => { march.resolve(response(2250)); });
-    expect(screen.getByText('USD 0.00')).toBeTruthy();
+    expect(screen.getByText('No revenue for this period.')).toBeTruthy();
     expect(screen.queryByText('USD 2,250.00')).toBeNull();
   });
 
@@ -96,7 +97,7 @@ describe('dashboard reporting controls', () => {
       expect(screen.queryByText('USD 2,250.00')).toBeNull();
       mocks.summary.mockResolvedValue(response(0));
       fireEvent.change(screen.getByLabelText('Month'), { target: { value: '2024-04' } });
-      await screen.findByText('USD 0.00');
+      await screen.findByText('No revenue for this period.');
       expect(screen.queryByRole('alert')).toBeNull();
     } finally { errorLog.mockRestore(); }
   });
@@ -111,7 +112,7 @@ describe('dashboard reporting controls', () => {
     expect(screen.queryByText('Beach House Alpha')).toBeNull();
     expect(screen.queryByText('USD 2,250.00')).toBeNull();
     await screen.findByText('Mountain Lodge Beta');
-    await screen.findByText('USD 0.00');
+    await screen.findByText('No revenue for this period.');
     monthly('2024-03');
     expect(screen.getByText(/Based on check-in dates in America\/New_York/)).toBeTruthy();
   });
@@ -132,4 +133,22 @@ describe('dashboard reporting controls', () => {
     expect(screen.getByRole('alert').textContent).toContain('Failed to load properties');
     expect(mocks.summary).not.toHaveBeenCalled();
   });
+});
+
+it('displays mixed currencies separately without losing cents on large string amounts', async () => {
+  mocks.summary.mockResolvedValue({
+    property_id: 'prop-001', total_revenue: null, currency: null, reservations_count: 4,
+    revenue_by_currency: [
+      {currency: 'USD', total_revenue: '9007199254740993.01', exact_total_revenue: '9007199254740993.010', reservations_count: 1},
+      {currency: 'EUR', total_revenue: '2.68', exact_total_revenue: '2.675', reservations_count: 1},
+      {currency: 'JPY', total_revenue: '1251', exact_total_revenue: '1250.500', reservations_count: 1},
+      {currency: 'KWD', total_revenue: '-1.235', exact_total_revenue: '-1.235', reservations_count: 1},
+    ],
+  });
+  render(<Dashboard />);
+  await screen.findByText('USD 9,007,199,254,740,993.01');
+  expect(screen.getByText('EUR 2.68')).toBeTruthy();
+  expect(screen.getByText('JPY 1,251')).toBeTruthy();
+  expect(screen.getByText('KWD -1.235')).toBeTruthy();
+  expect(screen.getByText('Totals shown separately by currency.')).toBeTruthy();
 });

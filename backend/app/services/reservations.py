@@ -2,6 +2,9 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Dict, Any
 import logging
+from decimal import Decimal, ROUND_HALF_UP, localcontext
+from babel.core import get_global
+from babel.numbers import get_currency_precision
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -42,7 +45,7 @@ async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str,
 async def _calculate_revenue(property_id: str, tenant_id: str,
                              start: datetime | None = None, end: datetime | None = None) -> Dict[str, Any]:
     query = """
-        SELECT COALESCE(SUM(total_amount), 0) AS total_revenue,
+        SELECT currency, SUM(total_amount) AS total_revenue,
                COUNT(*) AS reservation_count
         FROM reservations
         WHERE property_id = :property_id AND tenant_id = :tenant_id
@@ -51,17 +54,40 @@ async def _calculate_revenue(property_id: str, tenant_id: str,
     if start is not None:
         query += " AND check_in_date >= :start AND check_in_date < :end"
         params.update(start=start, end=end)
+    query += " GROUP BY currency ORDER BY currency"
     try:
         await db_pool.initialize()
         async with db_pool.get_session() as session:
             result = await session.execute(text(query), params)
-            row = result.one()
+            totals = []
+            for row in result.all():
+                currency = row.currency
+                if currency not in get_global('all_currencies'):
+                    raise RevenueUnavailableError("Reservation currency is missing or invalid")
+                amount = row.total_revenue
+                if not isinstance(amount, Decimal) or not amount.is_finite():
+                    raise RevenueUnavailableError("Reservation amount is invalid")
+                digits = get_currency_precision(currency)
+                with localcontext() as context:
+                    context.prec = max(28, len(amount.as_tuple().digits) + digits + 2)
+                    rounded = amount.quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+                if rounded == 0:
+                    rounded = abs(rounded)
+                totals.append({
+                    "currency": currency,
+                    "total_revenue": format(rounded, 'f'),
+                    "exact_total_revenue": format(amount, 'f'),
+                    "reservations_count": row.reservation_count,
+                })
+            # Never manufacture a currency or combine unlike currencies into one total.
+            single = totals[0] if len(totals) == 1 else None
             return {
                 "property_id": property_id,
                 "tenant_id": tenant_id,
-                "total": str(row.total_revenue),
-                "currency": "USD",
-                "count": row.reservation_count,
+                "total": single["total_revenue"] if single else None,
+                "currency": single["currency"] if single else None,
+                "count": sum(item["reservations_count"] for item in totals),
+                "revenue_by_currency": totals,
             }
     except (SQLAlchemyError, OSError, TimeoutError) as exc:
         logger.exception("Revenue database query failed for tenant %s, property %s",

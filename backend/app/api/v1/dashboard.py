@@ -46,11 +46,11 @@ async def get_dashboard_summary(
     except (PropertiesUnavailableError, RevenueUnavailableError) as exc:
         raise HTTPException(status_code=503, detail="Revenue is temporarily unavailable") from exc
 
-    total_revenue_float = float(revenue_data['total'])
     return {
         "property_id": revenue_data['property_id'],
-        "total_revenue": total_revenue_float,
+        "total_revenue": revenue_data['total'],
         "currency": revenue_data['currency'],
+        "revenue_by_currency": revenue_data['revenue_by_currency'],
         "reservations_count": revenue_data['count'],
         "month": month,
         "year": year,
