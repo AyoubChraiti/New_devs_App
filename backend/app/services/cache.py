@@ -13,9 +13,9 @@ async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any
     if not isinstance(tenant_id, str) or not tenant_id.strip():
         raise ValueError("Tenant identity is required for revenue summaries")
 
-    # Version the namespace to bypass legacy entries shared across tenants.
+    # Version the namespace to bypass legacy shared entries and previously cached mock totals.
     # JSON encoding keeps tenant/property pairs distinct even if IDs contain ':'.
-    cache_key = "revenue:v2:" + json.dumps([tenant_id, property_id], separators=(",", ":"))
+    cache_key = "revenue:v3:" + json.dumps([tenant_id, property_id], separators=(",", ":"))
     
     # Try to get from cache
     cached = await redis_client.get(cache_key)

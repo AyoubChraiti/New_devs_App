@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any
 from app.services.cache import get_revenue_summary
+from app.services.reservations import RevenueUnavailableError
 from app.core.auth import authenticate_request as get_current_user
 
 router = APIRouter()
@@ -15,7 +16,10 @@ async def get_dashboard_summary(
     if not isinstance(tenant_id, str) or not tenant_id.strip():
         raise HTTPException(status_code=403, detail="Tenant identity is required")
     
-    revenue_data = await get_revenue_summary(property_id, tenant_id)
+    try:
+        revenue_data = await get_revenue_summary(property_id, tenant_id)
+    except RevenueUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Revenue is temporarily unavailable") from exc
     
     total_revenue_float = float(revenue_data['total'])
     
