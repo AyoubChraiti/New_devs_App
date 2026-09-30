@@ -83,7 +83,7 @@ class RevenueFailureResponseTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(tenant_id='tenant-a')
-        with patch('app.api.v1.dashboard.get_revenue_summary', new_callable=AsyncMock,
+        with patch('app.api.v1.dashboard.get_tenant_properties', new_callable=AsyncMock, return_value=[{'id': 'prop-001'}]), patch('app.api.v1.dashboard.get_revenue_summary', new_callable=AsyncMock,
                    side_effect=reservations.RevenueUnavailableError('private database details')):
             with TestClient(app) as client:
                 response = client.get('/dashboard/summary?property_id=prop-001')

@@ -1449,6 +1449,10 @@ export class SecureAPIClient {
   }
 
   // ============= DASHBOARD API =============
+  async getDashboardProperties() {
+    return this.request<Array<{ id: string; name: string; timezone: string }>>('/api/v1/dashboard/properties');
+  }
+
   /**
    * Get dashboard summary with optional simulation header
    */
