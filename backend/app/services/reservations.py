@@ -1,5 +1,5 @@
-from datetime import datetime
-from decimal import Decimal
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Dict, Any
 import logging
 
@@ -14,46 +14,47 @@ class RevenueUnavailableError(Exception):
     """Revenue could not be read from its source database."""
 
 
-async def calculate_monthly_revenue(property_id: str, month: int, year: int, db_session=None) -> Decimal:
-    """
-    Calculates revenue for a specific month.
-    """
+def monthly_utc_bounds(year: int, month: int, timezone_name: str):
+    """Convert local calendar boundaries independently so DST offsets are correct."""
+    if not 1 <= year <= 9998 or not 1 <= month <= 12:
+        raise ValueError("Invalid reporting month")
+    zone = ZoneInfo(timezone_name)
+    start = datetime(year, month, 1, tzinfo=zone)
+    end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=zone)
+    return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
 
-    start_date = datetime(year, month, 1)
-    if month < 12:
-        end_date = datetime(year, month + 1, 1)
-    else:
-        end_date = datetime(year + 1, 1, 1)
-        
-    print(f"DEBUG: Querying revenue for {property_id} from {start_date} to {end_date}")
 
-    # SQL Simulation (This would be executed against the actual DB)
-    query = """
-        SELECT SUM(total_amount) as total
-        FROM reservations
-        WHERE property_id = $1
-        AND tenant_id = $2
-        AND check_in_date >= $3
-        AND check_in_date < $4
-    """
-    
-    # In production this query executes against a database session.
-    # result = await db.fetch_val(query, property_id, tenant_id, start_date, end_date)
-    # return result or Decimal('0')
-    
-    return Decimal('0') # Placeholder for now until DB connection is finalized
+async def calculate_monthly_revenue(property_id: str, tenant_id: str, month: int,
+                                    year: int, timezone_name: str) -> Dict[str, Any]:
+    try:
+        start, end = monthly_utc_bounds(year, month, timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise RevenueUnavailableError("Invalid property reporting time zone or period") from exc
+    result = await _calculate_revenue(property_id, tenant_id, start, end)
+    return {**result, "month": month, "year": year, "timezone": timezone_name}
+
 
 async def calculate_total_revenue(property_id: str, tenant_id: str) -> Dict[str, Any]:
     """Aggregate actual reservations, scoped to the authenticated tenant."""
+    return await _calculate_revenue(property_id, tenant_id)
+
+
+async def _calculate_revenue(property_id: str, tenant_id: str,
+                             start: datetime | None = None, end: datetime | None = None) -> Dict[str, Any]:
+    query = """
+        SELECT COALESCE(SUM(total_amount), 0) AS total_revenue,
+               COUNT(*) AS reservation_count
+        FROM reservations
+        WHERE property_id = :property_id AND tenant_id = :tenant_id
+    """
+    params = {"property_id": property_id, "tenant_id": tenant_id}
+    if start is not None:
+        query += " AND check_in_date >= :start AND check_in_date < :end"
+        params.update(start=start, end=end)
     try:
         await db_pool.initialize()
         async with db_pool.get_session() as session:
-            result = await session.execute(text("""
-                SELECT COALESCE(SUM(total_amount), 0) AS total_revenue,
-                       COUNT(*) AS reservation_count
-                FROM reservations
-                WHERE property_id = :property_id AND tenant_id = :tenant_id
-            """), {"property_id": property_id, "tenant_id": tenant_id})
+            result = await session.execute(text(query), params)
             row = result.one()
             return {
                 "property_id": property_id,

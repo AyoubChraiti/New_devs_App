@@ -6,7 +6,8 @@ import os
 # Initialize Redis client (typically configured centrally).
 redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
-async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any]:
+async def get_revenue_summary(property_id: str, tenant_id: str, *, month: int | None = None,
+                              year: int | None = None, timezone_name: str | None = None) -> Dict[str, Any]:
     """
     Fetches revenue summary, utilizing caching to improve performance.
     """
@@ -17,6 +18,15 @@ async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any
     # JSON encoding keeps tenant/property pairs distinct even if IDs contain ':'.
     cache_key = "revenue:v3:" + json.dumps([tenant_id, property_id], separators=(",", ":"))
     
+    if (month is None) != (year is None):
+        raise ValueError("Month and year must be supplied together")
+    if month is not None:
+        if not timezone_name or not 1 <= month <= 12 or not 1 <= year <= 9998:
+            raise ValueError("Invalid monthly reporting period or time zone")
+        cache_key = "revenue:v4:monthly:" + json.dumps(
+            [tenant_id, property_id, year, month, timezone_name], separators=(",", ":")
+        )
+
     # Try to get from cache
     cached = await redis_client.get(cache_key)
     if cached:
@@ -28,6 +38,10 @@ async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any
             isinstance(payload, dict)
             and payload.get("tenant_id") == tenant_id
             and payload.get("property_id") == property_id
+            and (month is None or (
+                payload.get("month") == month and payload.get("year") == year
+                and payload.get("timezone") == timezone_name
+            ))
         ):
             return payload
     
@@ -35,7 +49,11 @@ async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any
     from app.services.reservations import calculate_total_revenue
     
     # Calculate revenue
-    result = await calculate_total_revenue(property_id, tenant_id)
+    if month is None:
+        result = await calculate_total_revenue(property_id, tenant_id)
+    else:
+        from app.services.reservations import calculate_monthly_revenue
+        result = await calculate_monthly_revenue(property_id, tenant_id, month, year, timezone_name)
     
     # Cache the result for 5 minutes
     await redis_client.setex(cache_key, 300, json.dumps(result))
